@@ -187,9 +187,14 @@ git push -u origin main
    **Settings:**
    - **Name:** `verrfy-api` (or your preferred name)
    - **Environment:** `Python 3`
-   - **Build Command:** `pip install -r requirements.txt && python init_db.py`
+   - **Python Version:** `3.11.8` (important: avoid 3.13 for compatibility)
+   - **Build Command:** `pip install --upgrade pip && pip install -r requirements.txt`
    - **Start Command:** `uvicorn main:app --host 0.0.0.0 --port $PORT`
    - **Plan:** Free
+   
+   **Important:** 
+   - Make sure you've already created the database table using `schema.sql` in Supabase SQL Editor before deploying
+   - **DO NOT** include `python init_db.py` in the build command
 
 5. Click **"Create Web Service"**
 
