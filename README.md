@@ -207,10 +207,15 @@ git push -u origin main
    - **Key:** `DATABASE_URL`
    - **Value:** Your Supabase connection string
      ```
-     postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
+     postgresql://postgres:taducbao030824@db.iwxrpjeowtnhsacaonhz.supabase.co:5432/postgres
      ```
+3. **Important:** Also set Python version:
+   - **Key:** `PYTHON_VERSION`
+   - **Value:** `3.11.8`
 
 **Note:** `PORT` is automatically set by Render
+
+⚠️ **Make sure Supabase project is active** (not paused) before deploying!
 
 ### Step 4: Deploy
 

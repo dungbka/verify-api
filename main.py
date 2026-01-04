@@ -28,10 +28,22 @@ if env_file.exists():
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not DATABASE_URL:
-    raise ValueError("DATABASE_URL environment variable is required")
+    raise ValueError("DATABASE_URL environment variable is required. Please set it in Render dashboard Environment variables.")
 
-# Connection pool for better performance
-db_pool = SimpleConnectionPool(1, 20, DATABASE_URL)
+# Connection pool - lazy initialization to avoid connection errors at startup
+db_pool = None
+
+def get_db_pool():
+    """Get or create database connection pool (lazy initialization)"""
+    global db_pool
+    if db_pool is None:
+        try:
+            db_pool = SimpleConnectionPool(1, 20, DATABASE_URL)
+        except Exception as e:
+            # Log error but don't fail at startup - connection will be retried on first request
+            print(f"Warning: Could not create database pool at startup: {e}")
+            print("Connection will be retried on first database request.")
+    return db_pool
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -72,8 +84,13 @@ class VerifyResponse(BaseModel):
 # Database utilities
 def get_db_connection():
     """Get PostgreSQL database connection from pool"""
-    if db_pool:
-        return db_pool.getconn()
+    pool = get_db_pool()
+    if pool:
+        try:
+            return pool.getconn()
+        except Exception:
+            # If pool fails, try direct connection
+            pass
     return psycopg2.connect(DATABASE_URL)
 
 
@@ -144,7 +161,19 @@ async def root():
 @app.get("/health")
 async def health():
     """Health check endpoint"""
-    return {"status": "healthy"}
+    # Test database connection
+    db_status = "unknown"
+    try:
+        conn = get_db_connection()
+        conn.close()
+        db_status = "connected"
+    except Exception as e:
+        db_status = f"error: {str(e)[:100]}"
+    
+    return {
+        "status": "healthy",
+        "database": db_status
+    }
 
 
 @app.post("/activate", response_model=ActivateResponse, status_code=status.HTTP_200_OK)
