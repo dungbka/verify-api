@@ -7,27 +7,48 @@ Production-ready FastAPI backend for license activation and verification.
 - ✅ License activation with machine binding
 - ✅ Periodic license verification
 - ✅ One license per machine enforcement
-- ✅ SQLite database (lightweight)
+- ✅ PostgreSQL database (Supabase free tier)
 - ✅ Production-ready error handling
 - ✅ Pydantic validation
 
 ## Quick Start
 
-### 1. Install Dependencies
+### 1. Setup Supabase Database (Free Tier)
+
+1. Go to [Supabase](https://supabase.com) and sign up/login
+2. Create a new project
+3. Go to **Settings** → **Database**
+4. Copy the **Connection string** (URI format)
+   - It looks like: `postgresql://postgres:[YOUR-PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres`
+5. Set it as environment variable:
+
+```bash
+export DATABASE_URL="postgresql://postgres:[YOUR-PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres"
+```
+
+Or create a `.env` file:
+```bash
+DATABASE_URL=postgresql://postgres:[YOUR-PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
+```
+
+### 2. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Initialize Database
+### 3. Initialize Database
 
-```bash
-python init_db.py
-```
+1. Go to your Supabase project → **SQL Editor**
+2. Click **"New query"**
+3. Copy and paste the contents of `schema.sql`
+4. Click **"Run"** to execute
 
-This creates `license.db` with the `licenses` table.
+This creates the `licenses` table in your Supabase PostgreSQL database.
 
-### 3. Run the API
+> **Note:** The `init_db.py` script is available as an alternative method, but using SQL Editor is recommended.
+
+### 4. Run the API
 
 ```bash
 python main.py
@@ -41,7 +62,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 The API will be available at `http://localhost:8000`
 
-### 4. API Documentation
+### 5. API Documentation
 
 Once running, visit:
 - Swagger UI: `http://localhost:8000/docs`
@@ -101,23 +122,25 @@ Returns `valid: false` if license is invalid, expired, revoked, or machine_id do
 
 | Field          | Type       | Description                    |
 | -------------- | ---------- | ------------------------------ |
-| license_key    | TEXT (PK)  | License key                    |
-| machine_id     | TEXT       | Machine ID (NULL if not bound) |
-| status         | TEXT       | active / revoked               |
-| expired_at     | TEXT (ISO) | Expiration date                |
-| activated_at   | TEXT (ISO) | First activation timestamp     |
-| last_verify_at | TEXT (ISO) | Last verification timestamp    |
+| license_key    | VARCHAR(255) (PK) | License key                    |
+| machine_id     | VARCHAR(255) | Machine ID (NULL if not bound) |
+| status         | VARCHAR(50) | active / revoked               |
+| expired_at     | TIMESTAMP  | Expiration date                |
+| activated_at   | TIMESTAMP  | First activation timestamp     |
+| last_verify_at | TIMESTAMP  | Last verification timestamp    |
 
 ## Managing Licenses
 
 ### Add a License
 
-Connect to the database and insert:
+Connect to Supabase SQL Editor or use psql:
 
 ```sql
 INSERT INTO licenses (license_key, status, expired_at)
-VALUES ('YOUR-LICENSE-KEY', 'active', '2025-12-31T23:59:59');
+VALUES ('YOUR-LICENSE-KEY', 'active', '2025-12-31 23:59:59');
 ```
+
+Or use Supabase Dashboard → SQL Editor to run the query.
 
 ### Reset License (Re-issue)
 
@@ -170,33 +193,38 @@ git push -u origin main
 
 5. Click **"Create Web Service"**
 
-### Step 3: Environment Variables (Optional)
+### Step 3: Environment Variables
 
-If needed, you can add environment variables in Render dashboard:
-- `PORT` - Automatically set by Render
-- Add any custom configs here
+**Required:** Add `DATABASE_URL` environment variable in Render dashboard:
+
+1. Go to your service → **Environment**
+2. Add new environment variable:
+   - **Key:** `DATABASE_URL`
+   - **Value:** Your Supabase connection string
+     ```
+     postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
+     ```
+
+**Note:** `PORT` is automatically set by Render
 
 ### Step 4: Deploy
 
 Render will automatically:
 1. Clone your repository
 2. Install dependencies
-3. Run `init_db.py` to create database
-4. Start the FastAPI server
+3. Start the FastAPI server
 
-### Important Notes for Render Free Tier
+**Note:** The database table should already be created in Supabase using `schema.sql` before deployment.
 
-⚠️ **Persistent Storage:**
-- Render free tier **does NOT provide persistent disk storage**
-- SQLite database will be **reset on each deploy**
-- For production, consider:
-  - Using Render PostgreSQL (paid)
-  - Using external database (Supabase, Railway, etc.)
-  - Or upgrade to paid tier with persistent disk
+### Important Notes
 
-**Workaround for Free Tier:**
-- Use external SQLite hosting (e.g., Dropbox, Google Drive with sync)
-- Or migrate to PostgreSQL on a free tier service (Supabase, Railway)
+✅ **Database Persistence:**
+- Using Supabase PostgreSQL ensures data persistence
+- Database is hosted separately and won't be reset on deploy
+- Supabase free tier includes:
+  - 500 MB database storage
+  - Unlimited API requests
+  - Perfect for this use case
 
 ### Step 5: Access Your API
 
@@ -236,10 +264,10 @@ curl -X POST http://localhost:8000/verify \
 ```
 verrfy-api/
 ├── main.py          # FastAPI application
-├── init_db.py       # Database initialization
+├── init_db.py       # Database initialization (Python script)
+├── schema.sql       # Database schema (SQL file for Supabase)
 ├── requirements.txt # Python dependencies
 ├── README.md        # This file
-├── license.db       # SQLite database (created after init)
 └── .gitignore       # Git ignore rules
 ```
 
@@ -247,9 +275,10 @@ verrfy-api/
 
 - ✅ Input validation with Pydantic
 - ✅ HTTPS enforced on Render
+- ✅ Database credentials stored in environment variables
 - ⚠️ Consider adding API key authentication for production
 - ⚠️ Consider rate limiting for public APIs
-- ⚠️ Use environment variables for sensitive configs
+- ⚠️ Never commit `DATABASE_URL` to version control
 
 ## License
 

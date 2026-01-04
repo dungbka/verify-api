@@ -3,17 +3,35 @@ FastAPI License Verification API
 Production-ready backend for license activation and verification
 """
 
+import os
 from datetime import datetime
 from typing import Optional
-import sqlite3
 from pathlib import Path
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from psycopg2.pool import SimpleConnectionPool
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-# Database path
-DB_PATH = Path("license.db")
+# Try to load .env file if it exists (for local development)
+env_file = Path(".env")
+if env_file.exists():
+    with open(env_file) as f:
+        for line in f:
+            if line.strip() and not line.startswith("#") and "=" in line:
+                key, value = line.strip().split("=", 1)
+                os.environ[key] = value
+
+# Database connection string from environment variable
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable is required")
+
+# Connection pool for better performance
+db_pool = SimpleConnectionPool(1, 20, DATABASE_URL)
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -53,20 +71,28 @@ class VerifyResponse(BaseModel):
 
 # Database utilities
 def get_db_connection():
-    """Get SQLite database connection"""
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+    """Get PostgreSQL database connection from pool"""
+    if db_pool:
+        return db_pool.getconn()
+    return psycopg2.connect(DATABASE_URL)
+
+
+def return_db_connection(conn):
+    """Return connection to pool"""
+    if db_pool:
+        db_pool.putconn(conn)
+    else:
+        conn.close()
 
 
 def get_license(license_key: str) -> Optional[dict]:
     """Get license by license_key"""
     conn = get_db_connection()
     try:
-        cursor = conn.cursor()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
         cursor.execute(
             "SELECT license_key, machine_id, status, expired_at, activated_at, last_verify_at "
-            "FROM licenses WHERE license_key = ?",
+            "FROM licenses WHERE license_key = %s",
             (license_key,)
         )
         row = cursor.fetchone()
@@ -74,7 +100,7 @@ def get_license(license_key: str) -> Optional[dict]:
             return dict(row)
         return None
     finally:
-        conn.close()
+        return_db_connection(conn)
 
 
 def update_license(license_key: str, updates: dict):
@@ -82,23 +108,27 @@ def update_license(license_key: str, updates: dict):
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-        set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
+        set_clause = ", ".join([f"{k} = %s" for k in updates.keys()])
         values = list(updates.values()) + [license_key]
         cursor.execute(
-            f"UPDATE licenses SET {set_clause} WHERE license_key = ?",
+            f"UPDATE licenses SET {set_clause} WHERE license_key = %s",
             values
         )
         conn.commit()
     finally:
-        conn.close()
+        return_db_connection(conn)
 
 
-def is_expired(expired_at: Optional[str]) -> bool:
+def is_expired(expired_at) -> bool:
     """Check if license is expired"""
     if expired_at is None:
         return False
     try:
-        expired_date = datetime.fromisoformat(expired_at)
+        # Handle both datetime object (from PostgreSQL) and string
+        if isinstance(expired_at, datetime):
+            expired_date = expired_at
+        else:
+            expired_date = datetime.fromisoformat(str(expired_at))
         return datetime.now() > expired_date
     except (ValueError, TypeError):
         return False
