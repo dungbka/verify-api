@@ -7,28 +7,29 @@ Production-ready FastAPI backend for license activation and verification.
 - ✅ License activation with machine binding
 - ✅ Periodic license verification
 - ✅ One license per machine enforcement
-- ✅ PostgreSQL database (Supabase free tier)
+- ✅ Supabase REST API integration (no direct database connection needed)
 - ✅ Production-ready error handling
 - ✅ Pydantic validation
 
 ## Quick Start
 
-### 1. Setup Supabase Database (Free Tier)
+### 1. Setup Supabase (Free Tier)
 
 1. Go to [Supabase](https://supabase.com) and sign up/login
-2. Create a new project
-3. Go to **Settings** → **Database**
-4. Copy the **Connection string** (URI format)
-   - It looks like: `postgresql://postgres:[YOUR-PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres`
-5. Set it as environment variable:
+2. Create a new project (or use existing)
+3. Go to **Settings** → **API**
+4. Copy your **Project URL** and **anon/public key** (publishable key)
+5. Set environment variables:
 
 ```bash
-export DATABASE_URL="postgresql://postgres:[YOUR-PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres"
+export SUPABASE_URL="https://[PROJECT-REF].supabase.co"
+export SUPABASE_KEY="sb_publishable__[YOUR-KEY]"
 ```
 
 Or create a `.env` file:
 ```bash
-DATABASE_URL=postgresql://postgres:[YOUR-PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
+SUPABASE_URL=https://iwxrpjeowtnhsacaonhz.supabase.co
+SUPABASE_KEY=sb_publishable__sHAilM6z41QSb72bXUckg_wYKIY9jp
 ```
 
 ### 2. Install Dependencies
@@ -44,7 +45,7 @@ pip install -r requirements.txt
 3. Copy and paste the contents of `schema.sql`
 4. Click **"Run"** to execute
 
-This creates the `licenses` table in your Supabase PostgreSQL database.
+This creates the `licenses` table in your Supabase database. The REST API will automatically be available after creating the table.
 
 > **Note:** The `init_db.py` script is available as an alternative method, but using SQL Editor is recommended.
 
@@ -200,18 +201,16 @@ git push -u origin main
 
 ### Step 3: Environment Variables
 
-**Required:** Add `DATABASE_URL` environment variable in Render dashboard:
+**Required:** Add Supabase environment variables in Render dashboard:
 
 1. Go to your service → **Environment**
-2. Add new environment variable:
-   - **Key:** `DATABASE_URL`
-   - **Value:** Your Supabase connection string
-     ```
-     postgresql://postgres:taducbao030824@db.iwxrpjeowtnhsacaonhz.supabase.co:5432/postgres
-     ```
-3. **Important:** Also set Python version:
+2. Add environment variables:
+   - **Key:** `SUPABASE_URL`
+     **Value:** `https://iwxrpjeowtnhsacaonhz.supabase.co`
+   - **Key:** `SUPABASE_KEY`
+     **Value:** `sb_publishable__sHAilM6z41QSb72bXUckg_wYKIY9jp`
    - **Key:** `PYTHON_VERSION`
-   - **Value:** `3.11.8`
+     **Value:** `3.11.8`
 
 **Note:** `PORT` is automatically set by Render
 

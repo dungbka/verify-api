@@ -8,7 +8,9 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.8
-      # Add DATABASE_URL in Render dashboard after creating service
-      # - key: DATABASE_URL
-      #   value: postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
+      # Add Supabase credentials in Render dashboard after creating service
+      # - key: SUPABASE_URL
+      #   value: https://iwxrpjeowtnhsacaonhz.supabase.co
+      # - key: SUPABASE_KEY
+      #   value: sb_publishable__sHAilM6z41QSb72bXUckg_wYKIY9jp
 

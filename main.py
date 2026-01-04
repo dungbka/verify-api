@@ -1,15 +1,14 @@
 """
 FastAPI License Verification API
 Production-ready backend for license activation and verification
+Using Supabase REST API
 """
 
 import os
 from datetime import datetime
 from typing import Optional
 from pathlib import Path
-import psycopg2
-from psycopg2.extras import RealDictCursor
-from psycopg2.pool import SimpleConnectionPool
+import requests
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,26 +23,23 @@ if env_file.exists():
                 key, value = line.strip().split("=", 1)
                 os.environ[key] = value
 
-# Database connection string from environment variable
-DATABASE_URL = os.getenv("DATABASE_URL")
+# Supabase configuration from environment variables
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://iwxrpjeowtnhsacaonhz.supabase.co")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "sb_publishable__sHAilM6z41QSb72bXUckg_wYKIY9jp")
 
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL environment variable is required. Please set it in Render dashboard Environment variables.")
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError(
+        "SUPABASE_URL and SUPABASE_KEY environment variables are required. "
+        "Please set them in Render dashboard Environment variables."
+    )
 
-# Connection pool - lazy initialization to avoid connection errors at startup
-db_pool = None
-
-def get_db_pool():
-    """Get or create database connection pool (lazy initialization)"""
-    global db_pool
-    if db_pool is None:
-        try:
-            db_pool = SimpleConnectionPool(1, 20, DATABASE_URL)
-        except Exception as e:
-            # Log error but don't fail at startup - connection will be retried on first request
-            print(f"Warning: Could not create database pool at startup: {e}")
-            print("Connection will be retried on first database request.")
-    return db_pool
+# Supabase REST API headers
+SUPABASE_HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json",
+    "Prefer": "return=representation"
+}
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -81,59 +77,70 @@ class VerifyResponse(BaseModel):
     valid: bool = Field(..., description="Whether the license is valid")
 
 
-# Database utilities
-def get_db_connection():
-    """Get PostgreSQL database connection from pool"""
-    pool = get_db_pool()
-    if pool:
-        try:
-            return pool.getconn()
-        except Exception:
-            # If pool fails, try direct connection
-            pass
-    return psycopg2.connect(DATABASE_URL)
-
-
-def return_db_connection(conn):
-    """Return connection to pool"""
-    if db_pool:
-        db_pool.putconn(conn)
-    else:
-        conn.close()
-
-
+# Supabase REST API utilities
 def get_license(license_key: str) -> Optional[dict]:
-    """Get license by license_key"""
-    conn = get_db_connection()
+    """Get license by license_key using Supabase REST API"""
     try:
-        cursor = conn.cursor(cursor_factory=RealDictCursor)
-        cursor.execute(
-            "SELECT license_key, machine_id, status, expired_at, activated_at, last_verify_at "
-            "FROM licenses WHERE license_key = %s",
-            (license_key,)
+        response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/licenses",
+            headers=SUPABASE_HEADERS,
+            params={
+                "license_key": f"eq.{license_key}",
+                "select": "license_key,machine_id,status,expired_at,activated_at,last_verify_at"
+            },
+            timeout=10
         )
-        row = cursor.fetchone()
-        if row:
-            return dict(row)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data and len(data) > 0:
+                return data[0]
+        elif response.status_code == 404:
+            # Table doesn't exist
+            return None
+        elif response.status_code == 401:
+            raise Exception("Supabase authentication failed. Check API key.")
+        else:
+            print(f"Supabase API error: {response.status_code} - {response.text[:200]}")
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        print(f"Error connecting to Supabase: {e}")
         return None
-    finally:
-        return_db_connection(conn)
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        return None
 
 
 def update_license(license_key: str, updates: dict):
-    """Update license fields"""
-    conn = get_db_connection()
+    """Update license fields using Supabase REST API"""
     try:
-        cursor = conn.cursor()
-        set_clause = ", ".join([f"{k} = %s" for k in updates.keys()])
-        values = list(updates.values()) + [license_key]
-        cursor.execute(
-            f"UPDATE licenses SET {set_clause} WHERE license_key = %s",
-            values
+        # Convert datetime to ISO format strings if needed
+        formatted_updates = {}
+        for key, value in updates.items():
+            if isinstance(value, datetime):
+                formatted_updates[key] = value.isoformat()
+            else:
+                formatted_updates[key] = value
+        
+        response = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/licenses",
+            headers=SUPABASE_HEADERS,
+            params={"license_key": f"eq.{license_key}"},
+            json=formatted_updates,
+            timeout=10
         )
-        conn.commit()
-    finally:
-        return_db_connection(conn)
+        
+        if response.status_code not in [200, 204]:
+            print(f"Failed to update license: {response.status_code} - {response.text[:200]}")
+            raise Exception(f"Failed to update license: {response.status_code}")
+            
+    except requests.exceptions.RequestException as e:
+        print(f"Error updating license in Supabase: {e}")
+        raise
+    except Exception as e:
+        print(f"Unexpected error updating license: {e}")
+        raise
 
 
 def is_expired(expired_at) -> bool:
@@ -141,13 +148,16 @@ def is_expired(expired_at) -> bool:
     if expired_at is None:
         return False
     try:
-        # Handle both datetime object (from PostgreSQL) and string
+        # Handle both datetime object and string
         if isinstance(expired_at, datetime):
             expired_date = expired_at
+        elif isinstance(expired_at, str):
+            # Parse ISO format string
+            expired_date = datetime.fromisoformat(expired_at.replace('Z', '+00:00'))
         else:
-            expired_date = datetime.fromisoformat(str(expired_at))
-        return datetime.now() > expired_date
-    except (ValueError, TypeError):
+            return False
+        return datetime.now() > expired_date.replace(tzinfo=None) if expired_date.tzinfo else datetime.now() > expired_date
+    except (ValueError, TypeError, AttributeError):
         return False
 
 
@@ -160,19 +170,32 @@ async def root():
 
 @app.get("/health")
 async def health():
-    """Health check endpoint"""
-    # Test database connection
+    """Health check endpoint with database status"""
     db_status = "unknown"
     try:
-        conn = get_db_connection()
-        conn.close()
-        db_status = "connected"
+        # Test Supabase connection by making a simple query
+        response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/licenses",
+            headers=SUPABASE_HEADERS,
+            params={"select": "license_key", "limit": "1"},
+            timeout=5
+        )
+        
+        if response.status_code == 200:
+            db_status = "connected"
+        elif response.status_code == 401:
+            db_status = "authentication_error"
+        elif response.status_code == 404:
+            db_status = "table_not_found"
+        else:
+            db_status = f"error_{response.status_code}"
     except Exception as e:
         db_status = f"error: {str(e)[:100]}"
     
     return {
         "status": "healthy",
-        "database": db_status
+        "database": db_status,
+        "supabase_url": SUPABASE_URL
     }
 
 
@@ -195,21 +218,21 @@ async def activate(request: ActivateRequest):
         )
     
     # Check if license is active
-    if license_data["status"] != "active":
+    if license_data.get("status") != "active":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="License revoked"
         )
     
     # Check if license is expired
-    if is_expired(license_data["expired_at"]):
+    if is_expired(license_data.get("expired_at")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="License expired"
         )
     
     # Check machine_id binding
-    current_machine_id = license_data["machine_id"]
+    current_machine_id = license_data.get("machine_id")
     
     if current_machine_id is None:
         # First activation - bind machine_id
@@ -229,7 +252,7 @@ async def activate(request: ActivateRequest):
     
     else:
         # Already activated on same machine - update activated_at if needed
-        if license_data["activated_at"] is None:
+        if license_data.get("activated_at") is None:
             now = datetime.now().isoformat()
             update_license(request.license_key, {"activated_at": now})
         return ActivateResponse(status="activated")
@@ -251,15 +274,15 @@ async def verify(request: VerifyRequest):
         return VerifyResponse(valid=False)
     
     # Check if license is active
-    if license_data["status"] != "active":
+    if license_data.get("status") != "active":
         return VerifyResponse(valid=False)
     
     # Check if license is expired
-    if is_expired(license_data["expired_at"]):
+    if is_expired(license_data.get("expired_at")):
         return VerifyResponse(valid=False)
     
     # Check machine_id match
-    if license_data["machine_id"] != request.machine_id:
+    if license_data.get("machine_id") != request.machine_id:
         return VerifyResponse(valid=False)
     
     # License is valid - update last_verify_at
@@ -272,4 +295,3 @@ async def verify(request: VerifyRequest):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
