@@ -169,6 +169,7 @@ async def root():
 
 
 @app.get("/health")
+@app.head("/health")
 async def health():
     """Health check endpoint with database status"""
     db_status = "unknown"
